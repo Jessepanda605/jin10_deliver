@@ -1,44 +1,32 @@
 import requests
 import os
+import time
 from datetime import datetime, timedelta
 
 # --- 配置区 ---
 DINGTALK_WEBHOOK = os.getenv("DINGTALK_WEBHOOK")
 SENT_LOG_FILE = "sent_news_ids.log"
 
-def get_jin10_news():
-    # 方案 C：使用金十核心接口，并大幅度增强模拟伪装
-    url = "https://flash-api.jin10.com/get_flash_list"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-        "Origin": "https://www.jin10.com",
-        "Referer": "https://www.jin10.com/",
-        "x-app-id": "R67yP4S8319Z7jS3",
-        "x-version": "1.0.0"
-    }
-    
-    # 获取北京时间（UTC+8）
-    beijing_now = datetime.utcnow() + timedelta(hours=8)
+def get_wscn_news():
+    """抓取华尔街见闻快讯"""
+    url = "https://api-prod.wallstreetcn.com/apiv1/content/lives"
     params = {
-        "channel": "-1",
-        "vip": "1",
-        "max_time": beijing_now.strftime("%Y-%m-%d %H:%M:%S")
+        "channel": "global-channel",
+        "client": "pc",
+        "limit": "20"
+    }
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
     
     try:
-        # 注意：这里我们换回了 flash-api，但增加了极强的伪装头
-        resp = requests.get(url, headers=headers, params=params, timeout=15)
-        print(f"DEBUG-最新状态码: {resp.status_code}")
-        
-        if resp.status_code != 200:
-            print(f"接口返回异常内容片段: {resp.text[:200]}")
-            return []
-            
-        return resp.json().get("data", [])
+        resp = requests.get(url, params=params, headers=headers, timeout=15)
+        print(f"DEBUG-WSCN状态码: {resp.status_code}")
+        if resp.status_code == 200:
+            return resp.json().get("data", {}).get("items", [])
+        return []
     except Exception as e:
-        print(f"抓取过程出错: {e}")
+        print(f"抓取华尔街见闻失败: {e}")
         return []
 
 def load_sent_ids():
@@ -56,44 +44,46 @@ def send_to_dingtalk(content):
     payload = {
         "msgtype": "markdown",
         "markdown": {
-            "title": "金十财经汇总",
-            "text": f"### 金十财经汇总\n\n{content}"
+            "title": "财经快讯汇总",
+            "text": f"### 财经重磅快讯\n\n{content}"
         }
     }
     requests.post(DINGTALK_WEBHOOK, json=payload)
 
 def main():
     if not DINGTALK_WEBHOOK:
-        print("错误: 请确认 GitHub Secrets 已配置 DINGTALK_WEBHOOK")
+        print("错误: 钉钉 Webhook 未配置")
         return
 
-    news_list = get_jin10_news()
+    items = get_wscn_news()
     sent_ids = load_sent_ids()
     new_sent_list = []
     message_body = ""
     
-    print(f"成功获取 {len(news_list)} 条快讯数据，准备筛选...")
+    print(f"成功获取 {len(items)} 条快讯，开始筛选...")
 
-    for item in news_list:
-        data = item.get("data", {})
-        content = data.get("content", "")
+    for item in items:
         news_id = str(item.get("id"))
+        content_text = item.get("content_text", "")
+        # 华尔街见闻的权重标识，通常大于 0 代表重要
+        score = item.get("score", 0)
         
-        # 兼容性匹配：重要消息或包含关键词
-        is_important = data.get("important") == 1
-        is_hot = any(word in content for word in ["爆", "沸", "重磅", "紧急", "特朗普"])
+        # 筛选逻辑：重要性高，或者包含关键词
+        is_important = score > 0
+        is_hot = any(word in content_text for word in ["爆", "沸", "重磅", "特朗普", "美联储"])
         
         if (is_important or is_hot) and news_id not in sent_ids:
-            clean_content = content.replace("<b>", "**").replace("</b>", "**").replace("<br/>", "\n\n")
-            message_body += f"---\n\n{clean_content}\n\n"
+            # 简单清洗 HTML 标签
+            clean_text = content_text.replace("<p>", "").replace("</p>", "\n\n")
+            message_body += f"----- \n\n{clean_text}\n\n"
             new_sent_list.append(news_id)
 
     if message_body:
         send_to_dingtalk(message_body)
         save_sent_ids(new_sent_list)
-        print(f"已发送 {len(new_sent_list)} 条新快讯至钉钉")
+        print(f"已向钉钉推送 {len(new_sent_list)} 条新快讯")
     else:
-        print("未发现新的热点快讯")
+        print("暂时没有符合条件的重磅快讯")
 
 if __name__ == "__main__":
     main()
