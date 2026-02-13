@@ -1,4 +1,4 @@
-name: Jin10 Auto Push
+name: Financial News Auto Push
 
 on:
   schedule:
@@ -9,7 +9,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # 授予机器人写权限，用于更新日志文件
+    # 授予机器人写权限，用于更新并上传日志文件
     permissions:
       contents: write
 
@@ -27,6 +27,7 @@ jobs:
 
       - name: Run script
         env:
+          # 从 GitHub Secrets 读取你的钉钉 Webhook
           DINGTALK_WEBHOOK: ${{ secrets.DINGTALK_WEBHOOK }}
         run: python main.py
 
@@ -34,9 +35,9 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          # 只有当日志文件内容发生变化时才提交，防止无谓的报错
+          # 使用 -f 强制添加被 .gitignore 忽略的 log 文件
           if [ -f sent_news_ids.log ]; then
-            git add sent_news_ids.log
+            git add -f sent_news_ids.log
             git commit -m "Update sent news log [skip ci]" || echo "No changes to commit"
             git push
           else
