@@ -2,14 +2,14 @@ name: Jin10 Auto Push
 
 on:
   schedule:
-    # 每天北京时间 9:00, 14:00, 19:00 运行
+    # 每天北京时间 9:00, 14:00, 19:00 运行 (对应 UTC 1:00, 6:00, 11:00)
     - cron: '0 1,6,11 * * *'
-  workflow_dispatch: # 允许手动点击运行
+  workflow_dispatch: # 允许你随时手动点按钮运行
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    # 允许 Action 把日志文件写回仓库
+    # 授予机器人写权限，用于更新日志文件
     permissions:
       contents: write
 
@@ -27,15 +27,18 @@ jobs:
 
       - name: Run script
         env:
-          # 从 GitHub Secrets 读取 Webhook
           DINGTALK_WEBHOOK: ${{ secrets.DINGTALK_WEBHOOK }}
         run: python main.py
 
       - name: Commit log changes
-        # 这步很关键：它会把更新后的 sent_news_ids.log 存回 GitHub
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add sent_news_ids.log
-          git commit -m "Update sent news log" || echo "No changes to commit"
-          git push
+          # 只有当日志文件内容发生变化时才提交，防止无谓的报错
+          if [ -f sent_news_ids.log ]; then
+            git add sent_news_ids.log
+            git commit -m "Update sent news log [skip ci]" || echo "No changes to commit"
+            git push
+          else
+            echo "No log file found, skipping commit."
+          fi
